@@ -209,6 +209,8 @@
 //
 // }
 
+import 'dart:async';
+
 import 'package:firebase_backend/services/api_service.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -223,12 +225,18 @@ final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
 // Initialize local notifications
 final FlutterLocalNotificationsPlugin _localNotificationsPlugin =
-FlutterLocalNotificationsPlugin();
+    FlutterLocalNotificationsPlugin();
 
 // Assume navigatorKey is defined globally
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 class FirebaseService {
+
+  static final StreamController<AppNotification> _notificationStreamController =
+  StreamController.broadcast();
+
+  static Stream<AppNotification> get onNotification => _notificationStreamController.stream;
+
   Future<void> initialize({required String userId}) async {
     try {
       print('Starting FirebaseService initialization for user: $userId');
@@ -251,7 +259,7 @@ class FirebaseService {
         print('FCM Token refreshed: $token');
       });
 
-      // Foreground messages
+      // Moved onMessage listener to FirebaseService to prevent duplicates
       FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
         print('📲 Foreground message: ${message.notification?.title ?? message.data['title']}');
         try {
@@ -261,14 +269,34 @@ class FirebaseService {
             body: message.notification?.body ?? message.data['body'] ?? 'No Body',
             taskId: message.data['task_id'] ?? '',
             timestamp: DateTime.now(),
+            isRead: false,
           );
-          // Store in SharedPreferences
+          // Deduplicate notifications by taskId
           final prefs = await SharedPreferences.getInstance();
           List<String> storedNotifications = prefs.getStringList('notifications') ?? [];
-          storedNotifications.add(jsonEncode(notification.toJson()));
+          // Check for existing notification with the same taskId
+          final existingIndex = storedNotifications.indexWhere((json) {
+            try {
+              final stored = AppNotification.fromJson(jsonDecode(json));
+              return stored.taskId == notification.taskId;
+            } catch (e) {
+              return false;
+            }
+          });
+          if (existingIndex != -1) {
+            // Update existing notification (e.g., update timestamp)
+            storedNotifications[existingIndex] = jsonEncode(notification.toJson());
+            print('Updated existing notification with taskId: ${notification.taskId}');
+          } else {
+            // Add new notification
+            storedNotifications.add(jsonEncode(notification.toJson()));
+            print('Added new notification with taskId: ${notification.taskId}');
+          }
           await prefs.setStringList('notifications', storedNotifications);
           print('Stored notification in SharedPreferences: ${notification.toJson()}');
           await showNotification(message);
+          // Broadcast the new notification
+          _notificationStreamController.add(notification);
         } catch (e) {
           print('Error handling foreground message: $e');
         }
@@ -278,20 +306,30 @@ class FirebaseService {
 
       // App opened from background
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        print('📦 Notification opened: ${message.notification?.title ?? message.data['title']}');
+        print(
+          '📦 Notification opened: ${message.notification?.title ?? message.data['title']}',
+        );
         final taskId = message.data['task_id'];
         if (taskId != null) {
-          navigatorKey.currentState?.pushNamed('/task_details', arguments: taskId);
+          navigatorKey.currentState?.pushNamed(
+            '/task_details',
+            arguments: taskId,
+          );
         }
       });
 
       // App opened from terminated state
       RemoteMessage? initialMessage = await _messaging.getInitialMessage();
       if (initialMessage != null) {
-        print('Initial message: ${initialMessage.notification?.title ?? initialMessage.data['title']}');
+        print(
+          'Initial message: ${initialMessage.notification?.title ?? initialMessage.data['title']}',
+        );
         final taskId = initialMessage.data['task_id'];
         if (taskId != null) {
-          navigatorKey.currentState?.pushNamed('/task_details', arguments: taskId);
+          navigatorKey.currentState?.pushNamed(
+            '/task_details',
+            arguments: taskId,
+          );
         }
       }
 
@@ -316,12 +354,12 @@ class FirebaseService {
 
   static Future<void> _initializeLocalNotifications() async {
     try {
-      const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-      const DarwinInitializationSettings iosSettings = DarwinInitializationSettings();
-      const InitializationSettings initializationSettings = InitializationSettings(
-        android: androidSettings,
-        iOS: iosSettings,
-      );
+      const AndroidInitializationSettings androidSettings =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
+      const DarwinInitializationSettings iosSettings =
+          DarwinInitializationSettings();
+      const InitializationSettings initializationSettings =
+          InitializationSettings(android: androidSettings, iOS: iosSettings);
       await _localNotificationsPlugin.initialize(
         initializationSettings,
         onDidReceiveNotificationResponse: (response) {
@@ -344,6 +382,36 @@ class FirebaseService {
     }
   }
 
+  // static Future<void> firebaseMessagingBackgroundHandler(
+  //   RemoteMessage message,
+  // ) async {
+  //   try {
+  //     await Firebase.initializeApp();
+  //     print(
+  //       'Background message: ${message.notification?.title ?? message.data['title']}',
+  //     );
+  //     final notification = AppNotification(
+  //       id: null,
+  //       title:
+  //           message.notification?.title ?? message.data['title'] ?? 'No Title',
+  //       body: message.notification?.body ?? message.data['body'] ?? 'No Body',
+  //       taskId: message.data['task_id'] ?? '',
+  //       timestamp: DateTime.now(),
+  //       isRead: false,
+  //     );
+  //     // Store in SharedPreferences
+  //     final prefs = await SharedPreferences.getInstance();
+  //     List<String> storedNotifications =
+  //         prefs.getStringList('notifications') ?? [];
+  //     storedNotifications.add(jsonEncode(notification.toJson()));
+  //     await prefs.setStringList('notifications', storedNotifications);
+  //     print('Stored background notification: ${notification.toJson()}');
+  //     await showNotification(message);
+  //   } catch (e) {
+  //     print('Error handling background message: $e');
+  //   }
+  // }
+
   static Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     try {
       await Firebase.initializeApp();
@@ -354,14 +422,30 @@ class FirebaseService {
         body: message.notification?.body ?? message.data['body'] ?? 'No Body',
         taskId: message.data['task_id'] ?? '',
         timestamp: DateTime.now(),
+        isRead: false,
       );
-      // Store in SharedPreferences
+      // Deduplicate notifications in background handler
       final prefs = await SharedPreferences.getInstance();
       List<String> storedNotifications = prefs.getStringList('notifications') ?? [];
-      storedNotifications.add(jsonEncode(notification.toJson()));
+      final existingIndex = storedNotifications.indexWhere((json) {
+        try {
+          final stored = AppNotification.fromJson(jsonDecode(json));
+          return stored.taskId == notification.taskId;
+        } catch (e) {
+          return false;
+        }
+      });
+      if (existingIndex != -1) {
+        storedNotifications[existingIndex] = jsonEncode(notification.toJson());
+        print('Updated existing background notification with taskId: ${notification.taskId}');
+      } else {
+        storedNotifications.add(jsonEncode(notification.toJson()));
+        print('Added new background notification with taskId: ${notification.taskId}');
+      }
       await prefs.setStringList('notifications', storedNotifications);
       print('Stored background notification: ${notification.toJson()}');
       await showNotification(message);
+      // Note: Cannot broadcast in background, screens will reload on resume
     } catch (e) {
       print('Error handling background message: $e');
     }
@@ -370,7 +454,8 @@ class FirebaseService {
   static Future<void> showNotification(RemoteMessage message) async {
     try {
       print('Processing notification: ${message.messageId}');
-      final String channelId = message.notification?.android?.channelId ?? 'default_channel';
+      final String channelId =
+          message.notification?.android?.channelId ?? 'default_channel';
 
       final AndroidNotificationChannel channel = AndroidNotificationChannel(
         channelId,
@@ -380,14 +465,16 @@ class FirebaseService {
         playSound: true,
       );
 
-      final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-        channel.id,
-        channel.name,
-        channelDescription: 'This channel is used for important notifications.',
-        importance: Importance.high,
-        priority: Priority.high,
-        playSound: true,
-      );
+      final AndroidNotificationDetails androidDetails =
+          AndroidNotificationDetails(
+            channel.id,
+            channel.name,
+            channelDescription:
+                'This channel is used for important notifications.',
+            importance: Importance.high,
+            priority: Priority.high,
+            playSound: true,
+          );
 
       const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
         presentAlert: true,
@@ -401,8 +488,10 @@ class FirebaseService {
       );
 
       // Use notification data for consistency
-      final title = message.notification?.title ?? message.data['title'] ?? 'No Title';
-      final body = message.notification?.body ?? message.data['body'] ?? 'No Body';
+      final title =
+          message.notification?.title ?? message.data['title'] ?? 'No Title';
+      final body =
+          message.notification?.body ?? message.data['body'] ?? 'No Body';
       final taskId = message.data['task_id'] ?? '';
 
       await _localNotificationsPlugin.show(
@@ -417,6 +506,12 @@ class FirebaseService {
       print('Error in showNotification: $e');
     }
   }
+  // Added method to close the stream controller
+  static void dispose() {
+    _notificationStreamController.close();
+  }
+
+
 }
 
 // Assume ApiService exists

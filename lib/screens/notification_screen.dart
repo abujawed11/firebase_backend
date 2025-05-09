@@ -50,21 +50,29 @@
 //   }
 // }
 
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_backend/models/notification.dart';
 import 'dart:convert';
 
+import '../services/firebase_service.dart';
+
 class NotificationScreen extends StatefulWidget {
-  const NotificationScreen({super.key});
+  final VoidCallback? onNotificationRead;
+
+  const NotificationScreen({super.key, this.onNotificationRead});
 
   @override
   _NotificationScreenState createState() => _NotificationScreenState();
 }
 
-class _NotificationScreenState extends State<NotificationScreen> {
+class _NotificationScreenState extends State<NotificationScreen> with WidgetsBindingObserver {
   List<AppNotification> notifications = [];
+
+  StreamSubscription<AppNotification>? _notificationSubscription;
 
   @override
   void initState() {
@@ -72,6 +80,22 @@ class _NotificationScreenState extends State<NotificationScreen> {
     print('NotificationScreen initState called');
     _loadNotifications();
     _listenForNotifications();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      print('App resumed, reloading notifications in NotificationScreen');
+      _loadNotifications();
+    }
+  }
+
+  @override
+  void dispose() {
+    _notificationSubscription?.cancel(); // Added to cancel stream subscription
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _loadNotifications() async {
@@ -100,11 +124,36 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
+  // void _listenForNotifications() {
+  //   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+  //     print('Foreground message received in NotificationScreen: ${message.messageId}');
+  //     _loadNotifications(); // Reload notifications when a new message arrives
+  //   });
+  // }
+
   void _listenForNotifications() {
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('Foreground message received in NotificationScreen: ${message.messageId}');
-      _loadNotifications(); // Reload notifications when a new message arrives
+    // Replaced FirebaseMessaging.onMessage with stream subscription
+    _notificationSubscription = FirebaseService.onNotification.listen((notification) {
+      print('New notification received in NotificationScreen: ${notification.title}');
+      _loadNotifications();
     });
+  }
+
+  Future<void> _markAsRead(int index) async {
+    try {
+      final updatedNotification = notifications[index].copyWith(isRead: true);
+      final prefs = await SharedPreferences.getInstance();
+      final storedNotifications = prefs.getStringList('notifications') ?? [];
+      storedNotifications[index] = jsonEncode(updatedNotification.toJson());
+      await prefs.setStringList('notifications', storedNotifications);
+      setState(() {
+        notifications[index] = updatedNotification;
+      });
+      print('Marked notification as read: ${notifications[index].title}');
+      widget.onNotificationRead?.call(); // Notify HomeScreen
+    } catch (e) {
+      print('Error marking notification as read: $e');
+    }
   }
 
   String _formatTimestamp(DateTime timestamp) {
@@ -127,6 +176,21 @@ class _NotificationScreenState extends State<NotificationScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Notifications'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete),
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('notifications');
+              setState(() {
+                notifications = [];
+              });
+              print('Notifications cleared in NotificationScreen');
+              widget.onNotificationRead?.call();
+            },
+            tooltip: 'Clear Notifications',
+          ),
+        ],
       ),
       body: notifications.isEmpty
           ? const Center(child: Text('No notifications'))
@@ -135,15 +199,21 @@ class _NotificationScreenState extends State<NotificationScreen> {
         itemBuilder: (context, index) {
           final notification = notifications[index];
           return ListTile(
-            title: Text(notification.title),
+            title: Text(
+              notification.title,
+              style: TextStyle(
+                fontWeight: notification.isRead ? FontWeight.normal : FontWeight.bold,
+              ),
+            ),
             subtitle: Text(notification.body),
             trailing: Text(
               _formatTimestamp(notification.timestamp),
               style: const TextStyle(fontSize: 12, color: Colors.grey),
             ),
-            onTap: () {
-              print('Tapped notification: ${notification.taskId}');
-              // Navigate to TaskDetailsScreen if needed
+            onTap: () async {
+              if (!notification.isRead) {
+                await _markAsRead(index);
+              }
             },
           );
         },

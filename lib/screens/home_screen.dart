@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
-
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart'; // Added for WidgetsBindingObserver
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_backend/models/app_notification.dart';
@@ -9,6 +11,7 @@ import 'package:firebase_backend/services/api_service.dart';
 import 'package:firebase_backend/services/storage_service.dart';
 
 import '../models/notification.dart';
+import '../services/firebase_service.dart';
 import 'notification_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -18,7 +21,20 @@ class HomeScreen extends StatefulWidget {
   _HomeScreenState createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
+  // Changed SingleTickerProviderStateMixin to TickerProviderStateMixin to support multiple Tickers (AnimationController and TabController)
+  int _selectedIndex = 0;
+  late AnimationController _animationController;
+  late Animation<double> _animation;
+  StreamSubscription<AppNotification>? _notificationSubscription;
+  Timer? _debounceTimer; // Added for debouncing _loadNotifications
+
+  static const List<Widget> _tabs = <Widget>[
+    Center(child: Text('Tasks Tab')),
+    Center(child: Text('Notifications Tab')),
+  ];
+
   final _taskController = TextEditingController();
   List<Task> _tasks = [];
   List<Map<String, dynamic>> _notifications = [];
@@ -32,23 +48,60 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   @override
   void initState() {
     super.initState();
+    print('HomeScreen initState called');
+    // Initialize TabController
     _tabController = TabController(length: 2, vsync: this);
+    print('TabController initialized - Ticker 1 created');
+    // Initialize animation for bell icon
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    print('AnimationController initialized - Ticker 2 created');
+    _animation = Tween<double>(begin: 0, end: 0.2).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
+    // Load notifications and set up listeners
+    _listenForNotifications();
     _loadUserIdAndData();
     _loadNotifications();
+    WidgetsBinding.instance.addObserver(this);
   }
 
-  // Future<void> _checkSharedPreferences() async {
-  //   final prefs = await SharedPreferences.getInstance();
-  //   final storedNotifications = prefs.getStringList('notifications') ?? [];
-  //   print('SharedPreferences notifications: $storedNotifications');
-  //   if (storedNotifications.isNotEmpty) {
-  //     print('Parsed notifications:');
-  //     for (var json in storedNotifications) {
-  //       final notification = AppNotification.fromJson(jsonDecode(json));
-  //       print('- ${notification.title}: ${notification.body}');
-  //     }
-  //   }
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      print('App resumed, reloading notifications in HomeScreen');
+      _loadNotifications();
+    }
+  }
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+      _tabController?.index = index; // Sync TabBar with BottomNavigationBar
+    });
+  }
+
+  // void _listenForNotifications() {
+  //   FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+  //     print('Foreground message received in HomeScreen: ${message.messageId}');
+  //     _loadNotifications();
+  //     // Trigger bell animation
+  //     _animationController.forward().then(
+  //           (_) => _animationController.reverse(),
+  //     );
+  //   });
   // }
+
+  void _listenForNotifications() {
+    // Replaced FirebaseMessaging.onMessage with stream subscription
+    _notificationSubscription = FirebaseService.onNotification.listen((notification) {
+      print('New notification received in HomeScreen: ${notification.title}');
+      _loadNotifications();
+      _animationController.forward().then((_) => _animationController.reverse());
+    });
+  }
 
   Future<void> _checkSharedPreferences() async {
     try {
@@ -60,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         for (var json in storedNotifications) {
           try {
             final notification = AppNotification.fromJson(jsonDecode(json));
-            print('- ${notification.title}: ${notification.body}');
+            print('- ${notification.title}: ${notification.body} (Read: ${notification.isRead})');
           } catch (e) {
             print('Error parsing notification JSON: $e');
           }
@@ -72,7 +125,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       print('Error checking SharedPreferences: $e');
     }
   }
-
 
   Future<void> _loadUserIdAndData() async {
     setState(() {
@@ -91,7 +143,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final serverNotifications = await ApiService.getNotifications(_userId!);
       final users = await ApiService.getUsers();
 
-
       // Merge notifications (remove duplicates by task_id, prioritize newer timestamp)
       final mergedNotifications = <String, Map<String, dynamic>>{};
       for (var n in localNotifications) {
@@ -101,21 +152,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       for (var n in serverNotifications) {
         if (!mergedNotifications.containsKey(n['task_id']) ||
             DateTime.parse(n['timestamp']).isAfter(
-                DateTime.parse(mergedNotifications[n['task_id']]!['timestamp']))) {
+              DateTime.parse(mergedNotifications[n['task_id']]!['timestamp']),
+            )) {
           mergedNotifications[n['task_id']] = n;
         }
       }
 
-      // setState(() {
-      //   _tasks = tasks;
-      //   _notifications = mergedNotifications.values.toList()
-      //     ..sort((a, b) => DateTime.parse(b['timestamp']).compareTo(DateTime.parse(a['timestamp'])));
-      //   _isLoading = false;
-      // });
       setState(() {
         _tasks = tasks;
         _notifications = mergedNotifications.values.toList()
-          ..sort((a, b) => DateTime.parse(b['timestamp']).compareTo(DateTime.parse(a['timestamp'])));
+          ..sort(
+                (a, b) => DateTime.parse(b['timestamp']).compareTo(DateTime.parse(a['timestamp'])),
+          );
         _users = users;
         _selectedUserId = _users.isNotEmpty ? _users[0] : null;
         _isLoading = false;
@@ -126,30 +174,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       });
     }
   }
-
-  // Future<void> _addTask() async {
-  //   if (_taskController.text.isNotEmpty && _userId != null) {
-  //     final task = Task(
-  //       taskId: DateTime.now().toString(),
-  //       userId: _userId!,
-  //       title: _taskController.text,
-  //       status: 'pending',
-  //       createdAt: DateTime.now(),
-  //     );
-  //     final success = await ApiService.createTask(_userId!, task);
-  //     if (success) {
-  //       _taskController.clear();
-  //       _loadUserIdAndData(); // Refresh tasks and notifications
-  //       ScaffoldMessenger.of(context).showSnackBar(
-  //         const SnackBar(content: Text('Task added successfully')),
-  //       );
-  //     } else {
-  //       ScaffoldMessenger.of(context).showSnackBar(
-  //         const SnackBar(content: Text('Failed to add task')),
-  //       );
-  //     }
-  //   }
-  // }
 
   Future<void> _addTask() async {
     if (_taskController.text.isNotEmpty && _selectedUserId != null) {
@@ -182,192 +206,137 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('user_id');
+    FirebaseService.dispose(); // Added to close notification stream
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const LoginScreen()),
     );
   }
 
-  // Future<void> _loadNotifications() async {
-  //   final prefs = await SharedPreferences.getInstance();
-  //   final storedNotifications = prefs.getStringList('notifications') ?? [];
-  //   setState(() {
-  //     notifications = storedNotifications
-  //         .map((json) => AppNotification.fromJson(jsonDecode(json)))
-  //         .toList();
-  //   });
-  // }
-
   Future<void> _loadNotifications() async {
-    try {
-      print('Loading notifications from SharedPreferences');
-      final prefs = await SharedPreferences.getInstance();
-      final storedNotifications = prefs.getStringList('notifications') ?? [];
-      print('Loaded notifications from SharedPreferences: $storedNotifications');
-      setState(() {
-        notifications = storedNotifications
-            .map((json) {
-          try {
-            return AppNotification.fromJson(jsonDecode(json));
-          } catch (e) {
-            print('Error parsing notification JSON: $e');
-            return null;
-          }
-        })
-            .where((notification) => notification != null)
-            .cast<AppNotification>()
-            .toList();
-        print('Parsed notifications count: ${notifications.length}');
-      });
-    } catch (e) {
-      print('Error loading notifications: $e');
-    }
+    // Added debouncing to prevent overlapping calls
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 100), () async {
+      try {
+        print('Loading notifications from SharedPreferences in HomeScreen');
+        final prefs = await SharedPreferences.getInstance();
+        final storedNotifications = prefs.getStringList('notifications') ?? [];
+        print('Loaded notifications from SharedPreferences: $storedNotifications');
+        setState(() {
+          notifications = storedNotifications
+              .map((json) {
+            try {
+              return AppNotification.fromJson(jsonDecode(json));
+            } catch (e) {
+              print('Error parsing notification JSON: $e');
+              return null;
+            }
+          })
+              .where((notification) => notification != null)
+              .cast<AppNotification>()
+              .toList();
+          final unreadCount = notifications.where((n) => !n.isRead).length;
+          print('Parsed notifications count: ${notifications.length}');
+          print('Unread notifications count: $unreadCount');
+        });
+      } catch (e) {
+        print('Error loading notifications: $e');
+      }
+    });
   }
 
   @override
   void dispose() {
-    _taskController.dispose();
+    print('Disposing HomeScreen');
+    _debounceTimer?.cancel(); // Added to cancel debounce timer
+    _notificationSubscription?.cancel(); // Added to cancel stream subscription
+    _animationController.dispose();
+    print('AnimationController disposed');
     _tabController?.dispose();
+    print('TabController disposed');
+    WidgetsBinding.instance.removeObserver(this);
+    _taskController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final unreadCount = notifications.where((n) => !n.isRead).length;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Task Management'),
-
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications),
-            onPressed: () async{
-              print('Bell icon tapped');
-              // TODO: Navigate to NotificationScreen
-              // await _loadNotifications();
-              await _checkSharedPreferences();
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => NotificationScreen()),
-              );
-            },
-            tooltip: 'Notifications',
+          Stack(
+            children: [
+              RotationTransition(
+                turns: _animation,
+                child: IconButton(
+                  icon: const Icon(Icons.notifications),
+                  onPressed: () async {
+                    print('Bell icon tapped');
+                    await _checkSharedPreferences();
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => NotificationScreen(
+                          onNotificationRead: _loadNotifications,
+                        ),
+                      ),
+                    );
+                  },
+                  tooltip: 'Notifications',
+                ),
+              ),
+              if (unreadCount > 0)
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 16,
+                      minHeight: 16,
+                    ),
+                    child: Text(
+                      '$unreadCount',
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
           ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
             tooltip: 'Logout',
           ),
-
-
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Tasks'),
-            Tab(text: 'Notifications'),
-          ],
-        ),
+        // bottom: TabBar(
+        //   controller: _tabController,
+        //   tabs: const [Tab(text: 'Tasks'), Tab(text: 'Notifications')],
+        //   onTap: (index) {
+        //     setState(() {
+        //       _selectedIndex = index; // Sync BottomNavigationBar with TabBar
+        //     });
+        //   },
+        // ),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
-        controller: _tabController,
-        children: [
-          // Tasks Tab
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                TextField(
-                  controller: _taskController,
-                  decoration: const InputDecoration(
-                    labelText: 'New Task',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-
-
-                const SizedBox(height: 16),
-                DropdownButton<String>(
-                  value: _selectedUserId,
-                  hint: const Text('Select User'),
-                  isExpanded: true,
-                  items: _users.map((userId) {
-                    return DropdownMenuItem<String>(
-                      value: userId,
-                      child: Text(userId),
-                    );
-                  }).toList(),
-                  onChanged: (newUserId) {
-                    setState(() {
-                      _selectedUserId = newUserId;
-                    });
-                  },
-                ),
-
-
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: _addTask,
-                  child: const Text('Add Task'),
-                ),
-                const SizedBox(height: 24),
-                Expanded(
-                  child: _tasks.isEmpty
-                      ? const Center(child: Text('No tasks'))
-                      : ListView.builder(
-                    itemCount: _tasks.length,
-                    itemBuilder: (context, index) {
-                      final task = _tasks[index];
-                      return ListTile(
-                        title: Text(task.title),
-                        subtitle: Text('Status: ${task.status}'),
-                        trailing: Text(
-                          task.createdAt.toIso8601String().substring(0, 16),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        onTap: () {
-                          Navigator.pushNamed(
-                            context,
-                            '/task_details',
-                            arguments: task.taskId,
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Notifications Tab
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: _notifications.isEmpty
-                ? const Center(child: Text('No notifications'))
-                : ListView.builder(
-              itemCount: _notifications.length,
-              itemBuilder: (context, index) {
-                final notification = _notifications[index];
-                return ListTile(
-                  title: Text(notification['title']),
-                  subtitle: Text(notification['body']),
-                  trailing: Text(
-                    notification['timestamp'].substring(0, 16),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  onTap: () {
-                    Navigator.pushNamed(
-                      context,
-                      '/task_details',
-                      arguments: notification['task_id'],
-                    );
-                  },
-                );
-              },
-            ),
+      body: _tabs[_selectedIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(icon: Icon(Icons.task), label: 'Tasks'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.notifications),
+            label: 'Notifications',
           ),
         ],
+        currentIndex: _selectedIndex,
+        onTap: _onItemTapped,
       ),
     );
   }
