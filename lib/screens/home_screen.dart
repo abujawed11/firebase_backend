@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_backend/models/app_notification.dart';
@@ -5,6 +7,9 @@ import 'package:firebase_backend/models/task.dart';
 import 'package:firebase_backend/screens/login_screen.dart';
 import 'package:firebase_backend/services/api_service.dart';
 import 'package:firebase_backend/services/storage_service.dart';
+
+import '../models/notification.dart';
+import 'notification_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -22,13 +27,52 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   TabController? _tabController;
   List<String> _users = [];
   String? _selectedUserId;
+  List<AppNotification> notifications = [];
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadUserIdAndData();
+    _loadNotifications();
   }
+
+  // Future<void> _checkSharedPreferences() async {
+  //   final prefs = await SharedPreferences.getInstance();
+  //   final storedNotifications = prefs.getStringList('notifications') ?? [];
+  //   print('SharedPreferences notifications: $storedNotifications');
+  //   if (storedNotifications.isNotEmpty) {
+  //     print('Parsed notifications:');
+  //     for (var json in storedNotifications) {
+  //       final notification = AppNotification.fromJson(jsonDecode(json));
+  //       print('- ${notification.title}: ${notification.body}');
+  //     }
+  //   }
+  // }
+
+  Future<void> _checkSharedPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final storedNotifications = prefs.getStringList('notifications') ?? [];
+      print('SharedPreferences notifications: $storedNotifications');
+      if (storedNotifications.isNotEmpty) {
+        print('Parsed notifications:');
+        for (var json in storedNotifications) {
+          try {
+            final notification = AppNotification.fromJson(jsonDecode(json));
+            print('- ${notification.title}: ${notification.body}');
+          } catch (e) {
+            print('Error parsing notification JSON: $e');
+          }
+        }
+      } else {
+        print('No notifications in SharedPreferences');
+      }
+    } catch (e) {
+      print('Error checking SharedPreferences: $e');
+    }
+  }
+
 
   Future<void> _loadUserIdAndData() async {
     setState(() {
@@ -144,6 +188,42 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  // Future<void> _loadNotifications() async {
+  //   final prefs = await SharedPreferences.getInstance();
+  //   final storedNotifications = prefs.getStringList('notifications') ?? [];
+  //   setState(() {
+  //     notifications = storedNotifications
+  //         .map((json) => AppNotification.fromJson(jsonDecode(json)))
+  //         .toList();
+  //   });
+  // }
+
+  Future<void> _loadNotifications() async {
+    try {
+      print('Loading notifications from SharedPreferences');
+      final prefs = await SharedPreferences.getInstance();
+      final storedNotifications = prefs.getStringList('notifications') ?? [];
+      print('Loaded notifications from SharedPreferences: $storedNotifications');
+      setState(() {
+        notifications = storedNotifications
+            .map((json) {
+          try {
+            return AppNotification.fromJson(jsonDecode(json));
+          } catch (e) {
+            print('Error parsing notification JSON: $e');
+            return null;
+          }
+        })
+            .where((notification) => notification != null)
+            .cast<AppNotification>()
+            .toList();
+        print('Parsed notifications count: ${notifications.length}');
+      });
+    } catch (e) {
+      print('Error loading notifications: $e');
+    }
+  }
+
   @override
   void dispose() {
     _taskController.dispose();
@@ -156,12 +236,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Scaffold(
       appBar: AppBar(
         title: const Text('Task Management'),
+
         actions: [
+          IconButton(
+            icon: const Icon(Icons.notifications),
+            onPressed: () async{
+              print('Bell icon tapped');
+              // TODO: Navigate to NotificationScreen
+              // await _loadNotifications();
+              await _checkSharedPreferences();
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => NotificationScreen()),
+              );
+            },
+            tooltip: 'Notifications',
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: _logout,
             tooltip: 'Logout',
           ),
+
+
         ],
         bottom: TabBar(
           controller: _tabController,

@@ -78,3 +78,67 @@ class MyApp extends StatelessWidget {
     return prefs.getString('user_id');
   }
 }
+
+// import 'package:firebase_messaging/firebase_messaging.dart';
+// import 'package:flutter/material.dart';
+// import 'package:firebase_core/firebase_core.dart';
+// import 'package:shared_preferences/shared_preferences.dart';
+// import 'package:firebase_backend/screens/home_screen.dart';
+// import 'package:firebase_backend/screens/login_screen.dart';
+// import 'package:firebase_backend/screens/signup_screen.dart';
+// import 'package:firebase_backend/screens/task_details_screen.dart';
+// import 'package:firebase_backend/screens/notification_screen.dart';
+// import 'package:firebase_backend/services/firebase_service.dart';
+// import 'firebase_options.dart';
+//
+// // Define navigatorKey at the top level
+// final navigatorKey = GlobalKey<NavigatorState>();
+//
+// // Background message handler for FCM
+// @pragma('vm:entry-point')
+// Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+//   try {
+//     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+//     print('Handling a background message: ${message.messageId}');
+//     await FirebaseService.showNotification(message);
+//   } catch (e) {
+//     print('Error in background message handler: $e');
+//   }
+// }
+//
+// void main() async {
+//   WidgetsFlutterBinding.ensureInitialized();
+//   try {
+//     print('Initializing Firebase');
+//     await Firebase.initializeApp();
+//     print('Firebase initialized successfully');
+//     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+//   } catch (e) {
+//     print('Error initializing Firebase: $e');
+//   }
+//   runApp(const MyApp());
+// }
+//
+// class MyApp extends StatelessWidget {
+//   const MyApp({super.key});
+//
+//   @override
+//   Widget build(BuildContext context) {
+//     return MaterialApp(
+//       navigatorKey: navigatorKey,
+//       title: 'Task Management App',
+//       theme: ThemeData(primarySwatch: Colors.blue),
+//       initialRoute: '/signup',
+//       routes: {
+//         '/home': (context) => const HomeScreen(),
+//         '/login': (context) => const LoginScreen(),
+//         '/signup': (context) => const SignupScreen(),
+//         '/task_details': (context) => TaskDetailsScreen(
+//           taskId: ModalRoute.of(context)?.settings.arguments as String? ?? '',
+//         ),
+//         '/notifications': (context) => const NotificationScreen(notifications: []),
+//       },
+//       debugShowCheckedModeBanner: false,
+//     );
+//   }
+// }
