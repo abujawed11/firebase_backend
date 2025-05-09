@@ -1,8 +1,12 @@
 from flask import Blueprint, request, jsonify
 from utils.notifications import send_notification
 from database.db import store_token_db, get_token_db, save_notification_db, get_notifications_db, authenticate_user, signup_user, get_all_users
+import logging
 
 api = Blueprint('api', __name__)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @api.route('/signup', methods=['POST'])
 def signup():
@@ -19,15 +23,40 @@ def signup():
         return jsonify({'success': True, 'user_id': user_id}), 201
     return jsonify({'error': result}), 400
 
+# @api.route('/login', methods=['POST'])
+# def login():
+#     data = request.get_json()
+#     email = data.get('email')
+#     password = data.get('password')
+#     user_id = authenticate_user(email, password)
+#     if user_id:
+#         return jsonify({'success': True, 'user_id': user_id}), 200
+#     return jsonify({'error': 'Invalid credentials'}), 401
+
 @api.route('/login', methods=['POST'])
 def login():
-    data = request.get_json()
-    email = data.get('email')
-    password = data.get('password')
-    user_id = authenticate_user(email, password)
-    if user_id:
-        return jsonify({'success': True, 'user_id': user_id}), 200
-    return jsonify({'error': 'Invalid credentials'}), 401
+    try:
+        data = request.get_json(force=True)
+
+        if not data:
+            return jsonify({'error': 'Missing JSON payload'}), 400
+
+        email = data.get('email')
+        password = data.get('password')
+
+        if not email or not password:
+            return jsonify({'error': 'Email and password are required'}), 400
+
+        user_id = authenticate_user(email, password)
+
+        if user_id:
+            return jsonify({'success': True, 'user_id': user_id}), 200
+        else:
+            return jsonify({'error': 'Invalid credentials'}), 401
+
+    except Exception as e:
+        logger.exception("Error during login")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @api.route('/store-token', methods=['POST'])
 def store_token():

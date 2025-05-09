@@ -1,3 +1,4 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_backend/screens/home_screen.dart';
@@ -16,6 +17,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+
+  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
 
   Future<void> _login() async {
     if (_formKey.currentState!.validate()) {
@@ -36,6 +39,9 @@ class _LoginScreenState extends State<LoginScreen> {
         // Store user_id in shared_preferences
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('user_id', response['user_id']);
+
+        String? fcmToken = await _messaging.getToken();
+        print("FCM TOKEN --> $fcmToken");
 
         // Navigate to HomeScreen
         Navigator.pushReplacement(
