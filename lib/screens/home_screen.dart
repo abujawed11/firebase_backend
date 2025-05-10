@@ -1,10 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart'; // Added for WidgetsBindingObserver
+// Added for WidgetsBindingObserver
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_backend/models/app_notification.dart';
 import 'package:firebase_backend/models/task.dart';
 import 'package:firebase_backend/screens/login_screen.dart';
 import 'package:firebase_backend/services/api_service.dart';
@@ -48,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    FirebaseService.requestPermission();
     print('HomeScreen initState called');
     // Initialize TabController
     _tabController = TabController(length: 2, vsync: this);
@@ -316,15 +315,15 @@ class _HomeScreenState extends State<HomeScreen>
             tooltip: 'Logout',
           ),
         ],
-        // bottom: TabBar(
-        //   controller: _tabController,
-        //   tabs: const [Tab(text: 'Tasks'), Tab(text: 'Notifications')],
-        //   onTap: (index) {
-        //     setState(() {
-        //       _selectedIndex = index; // Sync BottomNavigationBar with TabBar
-        //     });
-        //   },
-        // ),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [Tab(text: 'Tasks'), Tab(text: 'Notifications')],
+          onTap: (index) {
+            setState(() {
+              _selectedIndex = index; // Sync BottomNavigationBar with TabBar
+            });
+          },
+        ),
       ),
       body: _tabs[_selectedIndex],
       bottomNavigationBar: BottomNavigationBar(

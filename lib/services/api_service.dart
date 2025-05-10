@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_backend/models/task.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://10.20.0.248:5000/api';
+  static const String baseUrl = 'http://192.168.1.116:5000/api';
 
   static Future<Map<String, dynamic>?> signup(String userId, String email, String password, String fcm) async {
     final response = await http.post(

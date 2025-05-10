@@ -243,7 +243,7 @@ class FirebaseService {
       await Firebase.initializeApp();
       print('Firebase initialized successfully');
 
-      await _requestPermission();
+      //await _requestPermission();
       await _initializeLocalNotifications();
 
       String? token = await _messaging.getToken();
@@ -339,7 +339,7 @@ class FirebaseService {
     }
   }
 
-  static Future<void> _requestPermission() async {
+  static Future<void> requestPermission() async {
     try {
       NotificationSettings settings = await _messaging.requestPermission(
         alert: true,

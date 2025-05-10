@@ -5,7 +5,6 @@ import 'package:firebase_backend/screens/home_screen.dart';
 import 'package:firebase_backend/screens/login_screen.dart';
 import 'package:firebase_backend/services/api_service.dart';
 
-import '../services/firebase_service.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -50,6 +49,7 @@ class _SignupScreenState extends State<SignupScreen> {
         await prefs.setString('user_id', response['user_id']);
 
         // Navigate to HomeScreen
+        //how to do
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const HomeScreen()),
